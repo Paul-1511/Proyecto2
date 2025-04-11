@@ -122,22 +122,12 @@ def get_available_seat_id():
         selected_seats.add(seat_id)
         return seat_id
 
-def simulate_user(user_id, isolation_level, results, max_retries=5):  # Aumentado a 5 reintentos
-    """Simula un usuario intentando reservar un asiento con reintentos"""
+def simulate_user(user_id, isolation_level, results, max_retries=5):
+    """Simula un usuario intentando reservar el mismo asiento"""
     conn = None
-    
+    seat_id = 1  # Todos intentan reservar el mismo asiento
+
     for retry in range(max_retries):
-        # Obtener un asiento que no haya sido seleccionado por otro hilo
-        seat_id = get_available_seat_id()
-        if seat_id is None:
-            results.append({
-                'user_id': user_id,
-                'success': False,
-                'error': 'No hay asientos disponibles',
-                'time': 0
-            })
-            return
-        
         try:
             conn = create_connection()
             isolation_map = {
@@ -150,109 +140,70 @@ def simulate_user(user_id, isolation_level, results, max_retries=5):  # Aumentad
             cursor = conn.cursor()
             start_time = time.time()
             
-            try:
-                # Verificar primero si el asiento está realmente disponible en la BD
+            # Verificar si el asiento ya está reservado
+            cursor.execute(
+                "SELECT COUNT(*) FROM reservas WHERE id_asiento = %s", 
+                (seat_id,)
+            )
+            count = cursor.fetchone()[0]
+            
+            if count == 0:
+                if random.random() < 0.3:
+                    time.sleep(random.uniform(0.01, 0.05))
+                
                 cursor.execute(
-                    "SELECT COUNT(*) FROM reservas WHERE id_asiento = %s", 
-                    (seat_id,)
+                    "INSERT INTO reservas (id_asiento, id_usuario, fecha_reserva) "
+                    "VALUES (%s, %s, %s) RETURNING id_reserva",
+                    (seat_id, user_id, datetime.now())
                 )
-                count = cursor.fetchone()[0]
+                reservation_id = cursor.fetchone()[0]
+                conn.commit()
                 
-                if count == 0:
-                    # El asiento está disponible, intentamos reservarlo
-                    # Añadimos espera aleatoria pequeña para simular tiempo de procesamiento de pago
-                    if random.random() < 0.3:  # 30% de las veces simulamos algún procesamiento
-                        time.sleep(random.uniform(0.01, 0.05))
-                    
-                    cursor.execute(
-                        "INSERT INTO reservas (id_asiento, id_usuario, fecha_reserva) "
-                        "VALUES (%s, %s, %s) RETURNING id_reserva",
-                        (seat_id, user_id, datetime.now())
-                    )
-                    reservation_id = cursor.fetchone()[0]
-                    conn.commit()
-                    
-                    # Registro de reserva exitosa
-                    results.append({
-                        'user_id': user_id,
-                        'success': True,
-                        'time': time.time() - start_time,
-                        'reservation_id': reservation_id,
-                        'seat_id': seat_id,
-                        'retries': retry
-                    })
-                    return  # Salimos de la función ya que tuvimos éxito
-                else:
-                    # El asiento no está disponible en la BD (aunque no estaba marcado en memoria)
-                    conn.rollback()
-                    
-                    # Liberamos el asiento para que otros puedan intentar
-                    with seat_lock:
-                        if seat_id in selected_seats:
-                            selected_seats.remove(seat_id)
-                    
-                    # Pequeña espera antes de reintentar para dar oportunidad a otros hilos
-                    time.sleep(random.uniform(0.01, 0.03))
-                    
-                    # Si es el último reintento, registramos el error
-                    if retry == max_retries - 1:
-                        results.append({
-                            'user_id': user_id,
-                            'success': False,
-                            'error': 'Asiento ya reservado en BD',
-                            'time': time.time() - start_time,
-                            'seat_id': seat_id,
-                            'retries': retry
-                        })
-                    # De lo contrario, continuamos al siguiente reintento
-                
-            except (errors.UniqueViolation, errors.SerializationError) as e:
+                results.append({
+                    'user_id': user_id,
+                    'success': True,
+                    'time': time.time() - start_time,
+                    'reservation_id': reservation_id,
+                    'seat_id': seat_id,
+                    'retries': retry
+                })
+                return
+            
+            else:
                 conn.rollback()
-                
-                # Liberamos el asiento
-                with seat_lock:
-                    if seat_id in selected_seats:
-                        selected_seats.remove(seat_id)
-                
-                # Espera exponencial entre reintentos para reducir contención
-                time.sleep(random.uniform(0.01, 0.05) * (retry + 1))
-                
-                # Si es el último reintento, registramos el error
-                if retry == max_retries - 1:
-                    error_type = 'Violación de unicidad' if isinstance(e, errors.UniqueViolation) else 'Error de serialización'
-                    results.append({
-                        'user_id': user_id,
-                        'success': False,
-                        'error': f'{error_type} después de {max_retries} intentos',
-                        'time': time.time() - start_time,
-                        'seat_id': seat_id,
-                        'retries': retry
-                    })
-                
-            except Exception as e:
-                conn.rollback()
-                
-                # Liberamos el asiento
-                with seat_lock:
-                    if seat_id in selected_seats:
-                        selected_seats.remove(seat_id)
+                time.sleep(random.uniform(0.01, 0.03))
                 
                 if retry == max_retries - 1:
                     results.append({
                         'user_id': user_id,
                         'success': False,
-                        'error': str(e),
+                        'error': 'Asiento ya reservado en BD',
                         'time': time.time() - start_time,
                         'seat_id': seat_id,
                         'retries': retry
                     })
-                
+
+        except (errors.UniqueViolation, errors.SerializationFailure) as e:
+            conn.rollback()
+            time.sleep(random.uniform(0.01, 0.05) * (retry + 1))
+            
+            if retry == max_retries - 1:
+                error_type = 'Violación de unicidad' if isinstance(e, errors.UniqueViolation) else 'Error de serialización'
+                results.append({
+                    'user_id': user_id,
+                    'success': False,
+                    'error': f'{error_type} después de {max_retries} intentos',
+                    'time': time.time() - start_time,
+                    'seat_id': seat_id,
+                    'retries': retry
+                })
+
         except Exception as e:
             if retry == max_retries - 1:
                 results.append({
                     'user_id': user_id,
                     'success': False,
-                    'error': f"Conexión fallida: {str(e)}",
+                    'error': f'Excepción: {str(e)}',
                     'retries': retry
                 })
         finally:
@@ -263,7 +214,6 @@ def simulate_user(user_id, isolation_level, results, max_retries=5):  # Aumentad
                     pass
                 conn.close()
     
-    # Si llegamos aquí sin retornar, todos los intentos fallaron y no se registró resultado
     if not any(r.get('user_id') == user_id for r in results):
         results.append({
             'user_id': user_id,
@@ -272,6 +222,7 @@ def simulate_user(user_id, isolation_level, results, max_retries=5):  # Aumentad
             'time': 0,
             'retries': max_retries
         })
+
 
 def run_test(num_users, isolation_level):
     """Ejecuta una prueba con usuarios concurrentes"""
