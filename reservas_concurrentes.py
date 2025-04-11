@@ -8,7 +8,7 @@ import sys
 
 # Configuración de conexión
 DB_CONFIG = {
-    "dbname": "reservas",
+    "dbname": "Reservas",
     "user": "postgres",
     "password": "postgres123",
     "host": "localhost",
@@ -19,7 +19,7 @@ DB_CONFIG = {
 # Datos para la simulación
 EVENT_ID = 1
 # Simulación más realista con menos asientos
-AVAILABLE_SEATS = range(1, 50)  # 49 asientos disponibles para un evento pequeño-mediano
+AVAILABLE_SEATS = 1
 NUM_USERS = [5, 10, 20, 30]  # Más usuarios intentando reservar simultáneamente
 ISOLATION_LEVELS = [
     "READ COMMITTED",
