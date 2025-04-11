@@ -3,6 +3,7 @@
 ## Autores:
 Pablo Méndez, Karen Pineda
 
+## 
 Este proyecto simula un sistema de reservas concurrentes para eventos, utilizando diferentes niveles de aislamiento de transacciones en PostgreSQL. La aplicación permite evaluar el rendimiento y la eficacia de distintas configuraciones de aislamiento de transacciones en un escenario realista de reserva de asientos.
 
 ## Descriprión 
