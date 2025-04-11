@@ -30,7 +30,7 @@ pip install psycopg2-binary
 ## Configuración
 Antes de ejecutar el simulador, verifica y modifica si es necesario los siguientes parámetros en el archivo `reservas_concurrentes.py`:
 
-``` python
+```python
 # Configuración de conexión
 DB_CONFIG = {
     "dbname": "reservas",
